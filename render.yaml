@@ -28,7 +28,7 @@ services:
     name: paperclip-fp01
     runtime: docker
     plan: starter
-    region: oregon            # match your Supabase region for low latency
+    region: ohio              # match your Supabase region for low latency (us-east-1 → ohio)
     branch: otherai-deploy
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
