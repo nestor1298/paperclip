@@ -1196,12 +1196,23 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       .where(and(eq(agents.companyId, issue.companyId), inArray(agents.role, ["cto", "ceo"])))
       .orderBy(sql`case when ${agents.role} = 'cto' then 0 else 1 end`, asc(agents.createdAt));
     candidateIds.push(...roleCandidates.map((agent) => agent.id));
-    if (issue.assigneeAgentId) candidateIds.push(issue.assigneeAgentId);
+    // INTENTIONALLY DO NOT fall back to issue.assigneeAgentId here. The whole
+    // reason a recovery is being created is that the assignee couldn't run the
+    // source issue. Re-assigning the recovery back to the same agent guarantees
+    // the recovery itself strands, which spawns *another* recovery, etc. — an
+    // unbounded cascade. If no manager/creator/exec is invokable, the recovery
+    // service must return null and let the caller mark the source issue blocked
+    // without spawning a recovery. (See README §3.5 / Finding 1.)
 
     const seen = new Set<string>();
     for (const agentId of candidateIds) {
       if (seen.has(agentId)) continue;
       seen.add(agentId);
+      // Defense in depth: if the assignee shows up via the creator or
+      // executive-role chains (e.g., the assignee is also the company's only
+      // CEO, or it created its own work), don't pick it as the recovery owner.
+      // Same self-loop protection as above.
+      if (issue.assigneeAgentId && agentId === issue.assigneeAgentId) continue;
       const candidate = await getAgent(agentId);
       if (!candidate || candidate.companyId !== issue.companyId) continue;
       const budgetBlock = await budgets.getInvocationBlock(issue.companyId, candidate.id, {
