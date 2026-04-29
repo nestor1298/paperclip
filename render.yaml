@@ -1,0 +1,117 @@
+# Render Blueprint for an otherAI-flavored Paperclip deployment.
+#
+# Each founding partner gets their own Render service + Supabase project (clean
+# data isolation per the runbook's tenancy decision). Duplicate this blueprint
+# per partner and change `name` + the Supabase DATABASE_URL.
+#
+# To use:
+#   1. Create a Supabase project (free tier is fine for v1). Copy the
+#      "Connection string" (Transaction pooler, port 6543) — you'll paste it
+#      into the Render dashboard as DATABASE_URL.
+#   2. On Render: New → Blueprint → connect this repo → select branch
+#      `otherai-deploy`. Render reads this file.
+#   3. After the build finishes (~6-10 min first time), the dashboard will
+#      prompt you to fill the un-synced env vars (DATABASE_URL,
+#      ANTHROPIC_API_KEY, NOTION_TOKEN, etc.). Paste each one.
+#   4. Wait for the service to go healthy (`/api/health` returns
+#      `{"status":"ok",…}`).
+#   5. Bootstrap the first instance admin via:
+#         curl -X POST https://<service>.onrender.com/api/auth/bootstrap-ceo
+#      … then follow the printed invite URL to create the first user.
+#
+# Plan / cost note: `starter` ($7/mo) is the smallest plan that supports
+# persistent disks. `free` does NOT (and the disk would be lost on every
+# deploy). Don't downgrade to free unless you're OK with losing all state.
+
+services:
+  - type: web
+    name: paperclip-fp01
+    runtime: docker
+    plan: starter
+    region: oregon            # match your Supabase region for low latency
+    branch: otherai-deploy
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
+
+    # /paperclip is where the Dockerfile mounts persistent state
+    # (config.json, instance lock files, agent JWT material, etc.).
+    # Postgres data lives in Supabase, NOT here, but Paperclip still
+    # writes a few stateful files under PAPERCLIP_HOME.
+    disk:
+      name: paperclip-state
+      mountPath: /paperclip
+      sizeGB: 1
+
+    envVars:
+      # ───────────────────────────────────────────────────────────
+      # Set in Render dashboard (each partner has different values)
+      # ───────────────────────────────────────────────────────────
+
+      - key: DATABASE_URL
+        sync: false
+        # Supabase connection string. Use the *pooler* (port 6543) so we
+        # don't exhaust direct connections. Format:
+        #   postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres
+
+      - key: ANTHROPIC_API_KEY
+        sync: false
+        # The key whose workspace has prepaid API credits. Required for the
+        # claude_local adapter to actually run agent work. Note: Paperclip
+        # plumbs this through the agent's adapterConfig.env at bootstrap
+        # time (see bootstrap.py [3c] pass) — setting it here in process
+        # env is belt-and-suspenders for any agents that read it directly.
+
+      - key: NOTION_TOKEN
+        sync: false
+        # ntn_… or secret_… — for the bidirectional notion-sync worker if
+        # you also deploy that as a Background Worker (Stage 2).
+
+      # ───────────────────────────────────────────────────────────
+      # Auto-generated secrets (Render generates, you never see)
+      # ───────────────────────────────────────────────────────────
+
+      - key: BETTER_AUTH_SECRET
+        generateValue: true
+        # Used to sign session cookies + agent JWTs. If this rotates, all
+        # users get logged out and all agent JWTs become invalid.
+
+      - key: PAPERCLIP_AGENT_JWT_SECRET
+        generateValue: true
+        # Specifically for the agent-auth JWT subsystem. Independent of
+        # BETTER_AUTH_SECRET so we can rotate one without the other.
+
+      # ───────────────────────────────────────────────────────────
+      # Static — same for every partner instance
+      # ───────────────────────────────────────────────────────────
+
+      - key: HOST
+        value: "0.0.0.0"
+        # Render expects the service to bind 0.0.0.0:$PORT.
+
+      - key: PORT
+        value: "3100"
+
+      - key: PAPERCLIP_DEPLOYMENT_MODE
+        value: "authenticated"
+        # NOT local_trusted. Real session-backed auth, browsable UI for
+        # founding-partner staff. Dockerfile already sets this; explicit
+        # here as documentation.
+
+      - key: PAPERCLIP_DEPLOYMENT_EXPOSURE
+        value: "private"
+        # The instance is private to this partner — no listing endpoints,
+        # no public UI links.
+
+      - key: HEARTBEAT_SCHEDULER_ENABLED
+        value: "true"
+        # Default. With the recovery-no-self-loop patch (in this branch),
+        # the cascade trap is fixed at the source — no need to disable.
+
+      - key: NODE_ENV
+        value: "production"
+
+      - key: SERVE_UI
+        value: "true"
+        # Serve the Paperclip web UI from the same service. If you put the
+        # UI on a separate CDN later, set this to false.
