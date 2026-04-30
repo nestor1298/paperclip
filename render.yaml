@@ -115,3 +115,28 @@ services:
         value: "true"
         # Serve the Paperclip web UI from the same service. If you put the
         # UI on a separate CDN later, set this to false.
+
+      # ───────────────────────────────────────────────────────────
+      # Per-partner public URL settings — UPDATE these when you
+      # duplicate this blueprint for a new partner. The hostname
+      # MUST match the Render service URL exactly (no protocol,
+      # no trailing slash) or `privateHostnameGuard` returns 403
+      # on every request including /api/health (Render's
+      # healthcheck then declares the deploy unhealthy → 502).
+      # ───────────────────────────────────────────────────────────
+
+      - key: PAPERCLIP_ALLOWED_HOSTNAMES
+        value: "paperclip-fp01.onrender.com"
+        # Comma-separated list. Add custom domains here too once you
+        # CNAME them to the Render service.
+
+      - key: PAPERCLIP_PUBLIC_URL
+        value: "https://paperclip-fp01.onrender.com"
+        # Better Auth uses this as the auth base URL. Without it, the
+        # log shows `[Better Auth] Base URL could not be determined`
+        # and OAuth callbacks / cookies break.
+
+      - key: BETTER_AUTH_TRUSTED_ORIGINS
+        value: "https://paperclip-fp01.onrender.com"
+        # CORS allowlist for Better Auth. Empty list rejects all
+        # browser-originated auth requests.
